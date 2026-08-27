@@ -202,6 +202,7 @@ plots/
 The exact Orchestr.AI selector may emit additional diagnostic files through its
 `base` path.
 
+<<<<<<< HEAD
 Existing pool and training prediction NPZ files are reused by default, so a
 repeat run does not evaluate those frames with the ensemble again. Each cache
 is checked against the configured model paths, sampled source-frame indices,
@@ -212,6 +213,8 @@ outputs:
   reuse_predictions: false
 ```
 
+=======
+>>>>>>> 22f040ea05dc46910f1f953ae719730865691ffe
 ## CPU vs CUDA
 
 CUDA:

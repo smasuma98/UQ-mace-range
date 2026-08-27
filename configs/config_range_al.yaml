@@ -67,7 +67,10 @@ rdf_filter:
   reference_dataset: training_dataset.xyz
 
 outputs:
+<<<<<<< HEAD
   reuse_predictions: true
+=======
+>>>>>>> 22f040ea05dc46910f1f953ae719730865691ffe
   save_npz: true
   save_csv: true
   save_annotated_xyz: true
