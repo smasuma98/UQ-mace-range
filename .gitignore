@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Large ML models
+*.model
+*.pt
+*.pth
+*.ckpt
+
+# Large trajectory/output files
+*.npz
+*.npy
+*.log
+*.out
+*.err
+md_output.xyz
+geo_opt_trajectory.xyz
+*_trajectory.xyz
+
+# Generated outputs
+range_al_output/
+*_diagnostics.csv
+*_diagnostics.txt
+*_summary.csv
+*_summary.json
+*_selected_frames.xyz
+*_annotated.xyz
+
+# macOS
+.DS_Store

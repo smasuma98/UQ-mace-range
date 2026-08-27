@@ -1,0 +1,75 @@
+paths:
+  pool_trajectory: md_output.xyz
+  train_dataset: training_dataset.xyz
+  output_dir: range_al_output
+  output_prefix: range_al
+
+models:
+  - /path/to/model_2_stagetwo.model
+  - /path/to/model_6_stagetwo.model
+  - /path/to/model_7_stagetwo.model
+  - /path/to/model_9_stagetwo.model
+
+calculator:
+  module: mace.calculators
+  class: MACECalculator
+  use_range: true
+  enable_cueq: true
+  device: cuda
+  dtype: float32
+
+sampling:
+  start: 0
+  stop: null
+  stride: 1
+
+reference:
+  energy_key: energy
+  forces_key: forces
+
+features:
+  type: soap
+  species: null
+  r_cut: 4.0
+  n_max: 4
+  l_max: 4
+  periodic: false
+  average: outer
+  pca_n_components: 0.99
+
+calibration:
+  enabled: true
+  mode: var
+  min_spearman: 0.4
+  max_ence: 0.20
+  picp95_tol: 0.08
+
+active_learning:
+  enabled: true
+  window_size: 100
+  min_k: 5
+  budget_max: 50
+  percentile_gamma: 99
+  percentile_F_low: 95
+  percentile_F_hi: 99
+  rho_eV: 0.002
+
+  hard_sigma_E_atom_min: 0.001
+  hard_sigma_F_mean_min: 0.075
+  hard_sigma_F_max_min: 0.150
+  hard_Fmax_train_mult: 1.5
+
+  large_cluster_threshold: 300
+  surface_relax_factor: 1.5
+
+rdf_filter:
+  enabled: true
+  reference_dataset: training_dataset.xyz
+
+outputs:
+  reuse_predictions: true
+  save_npz: true
+  save_csv: true
+  save_annotated_xyz: true
+  save_selected_xyz: true
+  save_plots: true
