@@ -12,8 +12,10 @@ import pandas as pd
 
 from .calibration import (
     CalibrationBundle,
+    calibration_support,
     calibrate_energy_total,
     calibrate_force_components,
+    expected_absolute_errors,
 )
 
 
@@ -65,13 +67,7 @@ def run_orchestr_selection(
     output_dir: str | Path,
     prefix: str,
 ) -> dict[str, Any]:
-    """Prepare exact selector inputs, then delegate selection to Orchestr.AI.
-
-    The selector is given a canonical ``al_pool`` base name so that its native
-    text diagnostics use the same filename as Orchestr.AI itself:
-    ``al_pool_per_frame_diagnostics.txt``.  Prefix-specific aliases are also
-    written for backwards compatibility with the adapter's earlier outputs.
-    """
+    """Prepare selector inputs, using Orchestr.AI ivan2 calibration semantics."""
     (
         adaptive_learning_mig_pool_windowed,
         calibrate_alpha_reg_gcv,
@@ -97,30 +93,50 @@ def run_orchestr_selection(
     train_counts = np.asarray([len(frame) for frame in train_frames], dtype=float)
     pool_counts = np.asarray([len(frame) for frame in pool_frames], dtype=float)
 
-    # Calibration is fitted on per-atom energy uncertainty and force components.
+    # Orchestr.AI determines calibration support from RAW train/pool uncertainty.
+    support = calibration_support(
+        pool_frames=pool_frames,
+        train_frames=train_frames,
+        pool_stats=pool_stats,
+        train_stats=train_stats,
+        validation=validation,
+        bundle=calibration,
+    )
+    calibration_in_support = support["in_support"]
+    ood_risk_mask = support["ood_risk_mask"]
+
+    # Train calibration is applied directly.  For pool ISO, ivan2 uses VAR
+    # fallback outside calibration support.
     sigma_E_train = calibrate_energy_total(
         train_stats["sigma_energy"],
         train_counts,
         calibration,
-        use_only_if_accepted=True,
     )
     sigma_E_pool = calibrate_energy_total(
         pool_stats["sigma_energy"],
         pool_counts,
         calibration,
-        use_only_if_accepted=True,
+        in_support=calibration_in_support,
     )
     sigma_F_train = calibrate_force_components(
         train_stats["sigma_force_components"],
         calibration,
-        use_only_if_accepted=True,
     )
     sigma_F_pool = calibrate_force_components(
         pool_stats["sigma_force_components"],
         calibration,
-        use_only_if_accepted=True,
+        in_support=calibration_in_support,
     )
     sigma_F_pool_mean, sigma_F_pool_max = _force_summaries(sigma_F_pool)
+
+    expected_abs_E_atom, expected_abs_F_mean, expected_abs_F_max = (
+        expected_absolute_errors(
+            sigma_E_pool,
+            pool_counts,
+            sigma_F_pool_mean,
+            sigma_F_pool_max,
+        )
+    )
 
     rdf_enabled = bool(rdf_cfg.get("enabled", True))
     if rdf_enabled:
@@ -156,6 +172,14 @@ def run_orchestr_selection(
         rdf_ok_mask=rdf_ok_mask,
         sigma_F_pool_mean=sigma_F_pool_mean,
         sigma_F_pool_max=sigma_F_pool_max,
+        frame_max_force_pool=support["frame_max_force_pool"],
+        frame_mean_force_pool=support["frame_mean_force_pool"],
+        calibration_in_support=calibration_in_support,
+        ood_risk_mask=ood_risk_mask,
+        expected_abs_E_atom=expected_abs_E_atom,
+        expected_abs_F_mean=expected_abs_F_mean,
+        expected_abs_F_max=expected_abs_F_max,
+        train_frames=train_frames,
         rho_eV=float(active_cfg.get("rho_eV", 0.002)),
         min_k=int(active_cfg.get("min_k", 5)),
         window_size=int(active_cfg.get("window_size", 100)),
@@ -170,7 +194,7 @@ def run_orchestr_selection(
         large_cluster_threshold=int(active_cfg.get("large_cluster_threshold", 300)),
         surface_relax_factor=active_cfg.get("surface_relax_factor", 1.5),
         hard_floors_from_calibrated_train=bool(
-            calibration.energy_accepted or calibration.force_accepted
+            calibration.energy_mode or calibration.force_mode
         ),
         base=base,
         state="mace_range",
@@ -209,8 +233,10 @@ def run_orchestr_selection(
         "n_selected": int(len(selected_rel)),
         "selected_pool_rows": selected_rel.tolist(),
         "selected_source_frames": selected_source.tolist(),
-        "energy_calibration_used": bool(calibration.energy_accepted),
-        "force_calibration_used": bool(calibration.force_accepted),
+        "energy_calibration_used": calibration.energy_mode or "raw",
+        "force_calibration_used": calibration.force_mode or "raw",
+        "calibration_in_support_count": int(calibration_in_support.sum()),
+        "calibration_ood_count": int(ood_risk_mask.sum()),
         "rdf_filter_enabled": rdf_enabled,
         "diagnostics_txt": str(diagnostics_txt),
         "diagnostics_csv": str(diagnostics_csv),
