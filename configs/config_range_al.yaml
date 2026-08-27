@@ -66,11 +66,13 @@ rdf_filter:
   enabled: true
   reference_dataset: training_dataset.xyz
 
+plots:
+  dashboard_title: "MACE-RANGE / Orchestr.AI pool AL"
+  energy_smoothing_window: 50
+  save_legacy_plots: false
+
 outputs:
-<<<<<<< HEAD
   reuse_predictions: true
-=======
->>>>>>> 22f040ea05dc46910f1f953ae719730865691ffe
   save_npz: true
   save_csv: true
   save_annotated_xyz: true

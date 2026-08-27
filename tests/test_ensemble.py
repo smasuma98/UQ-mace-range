@@ -1,14 +1,9 @@
 import numpy as np
-<<<<<<< HEAD
 import pytest
 
 from orchestr_range_al.ensemble import compute_ensemble_statistics
 from orchestr_range_al.io import write_predictions_npz
 from orchestr_range_al.prediction import load_ensemble_predictions
-=======
-
-from orchestr_range_al.ensemble import compute_ensemble_statistics
->>>>>>> 22f040ea05dc46910f1f953ae719730865691ffe
 
 
 def test_ensemble_shapes_and_ddof():
@@ -24,9 +19,6 @@ def test_ensemble_shapes_and_ddof():
     np.testing.assert_allclose(
         stats["sigma_force_components"][:, 0, 0], [np.sqrt(2), np.sqrt(2)]
     )
-<<<<<<< HEAD
-
-
 def test_load_ensemble_predictions_validates_and_reuses_cache(tmp_path):
     frames = [np.zeros((2, 3)), np.zeros((2, 3))]
     model_paths = [tmp_path / "one.model", tmp_path / "two.model"]
@@ -48,5 +40,3 @@ def test_load_ensemble_predictions_validates_and_reuses_cache(tmp_path):
 
     with pytest.raises(ValueError, match="source-frame indices"):
         load_ensemble_predictions(cache_path, frames, model_paths, np.array([3, 8]))
-=======
->>>>>>> 22f040ea05dc46910f1f953ae719730865691ffe

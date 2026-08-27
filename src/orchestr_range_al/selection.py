@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import json
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -41,6 +42,13 @@ def _force_summaries(sigma_components: np.ndarray) -> tuple[np.ndarray, np.ndarr
     return np.mean(atom_sigma, axis=1), np.max(atom_sigma, axis=1)
 
 
+def _copy_if_distinct(source: Path, target: Path) -> None:
+    if source.resolve() == target.resolve():
+        return
+    if source.exists():
+        shutil.copyfile(source, target)
+
+
 def run_orchestr_selection(
     *,
     pool_frames,
@@ -57,7 +65,13 @@ def run_orchestr_selection(
     output_dir: str | Path,
     prefix: str,
 ) -> dict[str, Any]:
-    """Prepare exact selector inputs, then delegate selection to Orchestr.AI."""
+    """Prepare exact selector inputs, then delegate selection to Orchestr.AI.
+
+    The selector is given a canonical ``al_pool`` base name so that its native
+    text diagnostics use the same filename as Orchestr.AI itself:
+    ``al_pool_per_frame_diagnostics.txt``.  Prefix-specific aliases are also
+    written for backwards compatibility with the adapter's earlier outputs.
+    """
     (
         adaptive_learning_mig_pool_windowed,
         calibrate_alpha_reg_gcv,
@@ -78,9 +92,7 @@ def run_orchestr_selection(
     if int(good.sum()) < 2:
         raise ValueError("Need at least two finite training rows for GP calibration.")
 
-    alpha_sq, _, _, _, L = calibrate_alpha_reg_gcv(
-        F_train[good], y_train[good]
-    )
+    alpha_sq, _, _, _, L = calibrate_alpha_reg_gcv(F_train[good], y_train[good])
 
     train_counts = np.asarray([len(frame) for frame in train_frames], dtype=float)
     pool_counts = np.asarray([len(frame) for frame in pool_frames], dtype=float)
@@ -118,8 +130,13 @@ def run_orchestr_selection(
         rdf_thresholds = {}
         rdf_ok_mask = np.ones(len(pool_frames), dtype=bool)
 
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     diagnostics_runs: list[dict[str, Any]] = []
-    base = str(Path(output_dir) / prefix)
+
+    # Canonical Orchestr.AI basename.  _PoolActiveLearner appends
+    # ``_per_frame_diagnostics.txt`` internally.
+    base = str(output_dir / "al_pool")
 
     selected_frames, selected_rel = adaptive_learning_mig_pool_windowed(
         pool_frames,
@@ -164,10 +181,20 @@ def run_orchestr_selection(
     selected_rel = np.asarray(selected_rel, dtype=int)
     selected_source = np.asarray(pool_source_indices, dtype=int)[selected_rel]
 
-    output_dir = Path(output_dir)
-    diagnostics_csv = output_dir / f"{prefix}_pool_diagnostics.csv"
+    diagnostics_txt = output_dir / "al_pool_per_frame_diagnostics.txt"
+    diagnostics_csv = output_dir / "al_pool_diagnostics.csv"
     if diagnostics_runs:
         write_pool_al_diagnostics_csv(diagnostics_runs, str(diagnostics_csv))
+
+    # Keep adapter-prefix aliases so existing scripts do not break.
+    _copy_if_distinct(
+        diagnostics_txt,
+        output_dir / f"{prefix}_per_frame_diagnostics.txt",
+    )
+    _copy_if_distinct(
+        diagnostics_csv,
+        output_dir / f"{prefix}_pool_diagnostics.csv",
+    )
 
     pd.DataFrame(
         {
@@ -185,6 +212,8 @@ def run_orchestr_selection(
         "energy_calibration_used": bool(calibration.energy_accepted),
         "force_calibration_used": bool(calibration.force_accepted),
         "rdf_filter_enabled": rdf_enabled,
+        "diagnostics_txt": str(diagnostics_txt),
+        "diagnostics_csv": str(diagnostics_csv),
     }
     (output_dir / f"{prefix}_selection_summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -195,5 +224,7 @@ def run_orchestr_selection(
         "selected_indices": selected_rel,
         "selected_source_indices": selected_source,
         "diagnostics_runs": diagnostics_runs,
+        "diagnostics_txt": diagnostics_txt,
+        "diagnostics_csv": diagnostics_csv,
         "summary": summary,
     }

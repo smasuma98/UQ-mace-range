@@ -29,8 +29,7 @@ Version 1 does **not** run:
 - vibrational analysis;
 - NAMD;
 - DFT labelling/submission;
-- model retraining;
-- dashboards.
+- model retraining.
 
 ## Required environment
 
@@ -118,7 +117,7 @@ Orchestr.AI calibrate_alpha_reg_gcv
         ↓
 Orchestr.AI adaptive_learning_mig_pool_windowed
         ↓
-selected frames + diagnostics
+selected frames + Orchestr.AI diagnostics + dashboard
 ```
 
 ## Important shape conventions
@@ -189,6 +188,14 @@ range_al_calibration_factors.json
 range_al_annotated_pool.xyz
 range_al_selected_frames.xyz
 range_al_selected_indices.csv
+# Canonical Orchestr.AI-style diagnostics/dashboard
+al_pool_per_frame_diagnostics.txt
+al_pool_diagnostics.csv
+pool_energy_trace.npz
+al_dashboard_energy_trace.png
+al_dashboard_panels.png
+
+# Adapter-prefix aliases / other outputs
 range_al_pool_diagnostics.csv
 range_al_per_frame_diagnostics.txt
 range_al_selection_summary.json
@@ -196,13 +203,34 @@ range_al_run_manifest.json
 feature_metadata.json
 soap_scaler.joblib
 soap_pca.joblib
-plots/
 ```
 
-The exact Orchestr.AI selector may emit additional diagnostic files through its
-`base` path.
+The dashboard is generated from the **native Orchestr.AI per-frame diagnostics**,
+so the plotted train thresholds, hard floors, geometry failures, physical-cap
+failures and shortlist markers are the same values used by the selector.
 
-<<<<<<< HEAD
+Dashboard settings are controlled in the same single YAML:
+
+```yaml
+plots:
+  dashboard_title: "MACE-RANGE / Orchestr.AI pool AL"
+  energy_smoothing_window: 50
+  save_legacy_plots: false
+```
+
+Set `save_legacy_plots: true` only if you also want the older compact debug
+plots under `range_al_output/plots/`.
+
+The dashboard can also be regenerated without rerunning MACE inference:
+
+```bash
+python scripts/plot_al_dashboard.py \
+  --npz range_al_output/pool_energy_trace.npz \
+  --txt range_al_output/al_pool_per_frame_diagnostics.txt \
+  --output-dir range_al_output \
+  --title "My pool trajectory"
+```
+
 Existing pool and training prediction NPZ files are reused by default, so a
 repeat run does not evaluate those frames with the ensemble again. Each cache
 is checked against the configured model paths, sampled source-frame indices,
@@ -213,8 +241,6 @@ outputs:
   reuse_predictions: false
 ```
 
-=======
->>>>>>> 22f040ea05dc46910f1f953ae719730865691ffe
 ## CPU vs CUDA
 
 CUDA:

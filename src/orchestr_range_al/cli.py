@@ -22,7 +22,7 @@ from .io import (
     write_predictions_npz,
     write_selected_frames,
 )
-from .plotting import generate_standard_plots
+from .plotting import generate_orchestr_dashboard, generate_standard_plots
 from .prediction import evaluate_ensemble, load_ensemble_predictions
 from .selection import run_orchestr_selection
 from .validation import summary_dataframe, validate_predictions
@@ -51,7 +51,8 @@ def _planned_workflow(cfg):
     print("  6. fit/gate uncertainty calibration")
     print("  7. build SOAP/PCA train+pool features")
     print("  8. call Orchestr.AI adaptive_learning_mig_pool_windowed")
-    print("  9. write selected frames + diagnostics")
+    print("  9. write selected frames + Orchestr.AI diagnostics")
+    print(" 10. generate Orchestr.AI-style AL dashboard")
     print(f"Output directory: {cfg['paths']['output_dir']}")
 
 
@@ -231,13 +232,34 @@ def main(argv=None) -> int:
             )
 
     if cfg["outputs"].get("save_plots", True):
-        print("\n=== Optional plots ===")
-        generate_standard_plots(
-            pool_df,
-            validation["per_frame"],
-            selected_source_indices=selected["selected_source_indices"],
-            output_dir=output_dir / "plots",
-        )
+        print("\n=== Orchestr.AI-style AL dashboard ===")
+        plot_cfg = cfg.get("plots", {})
+        diagnostics_path = selected.get("diagnostics_txt")
+        if diagnostics_path is not None and Path(diagnostics_path).exists():
+            dashboard = generate_orchestr_dashboard(
+                pool_df,
+                diagnostics_path=diagnostics_path,
+                output_dir=output_dir,
+                title=str(
+                    plot_cfg.get(
+                        "dashboard_title",
+                        "MACE-RANGE / Orchestr.AI pool AL",
+                    )
+                ),
+                smoothing_window=int(plot_cfg.get("energy_smoothing_window", 50)),
+            )
+            print(f"Saved {dashboard['energy_trace_png'].name}")
+            print(f"Saved {dashboard['panels_png'].name}")
+        else:
+            print("[Warning] No Orchestr.AI per-frame diagnostics found; dashboard skipped.")
+
+        if bool(plot_cfg.get("save_legacy_plots", False)):
+            generate_standard_plots(
+                pool_df,
+                validation["per_frame"],
+                selected_source_indices=selected["selected_source_indices"],
+                output_dir=output_dir / "plots",
+            )
 
     write_run_manifest(
         output_dir / f"{prefix}_run_manifest.json",
