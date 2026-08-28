@@ -51,10 +51,7 @@ def load_ensemble_predictions(
 
     n_models = len(model_paths)
     n_frames = len(frames)
-    n_atoms = len(frames[0])
     atom_counts = np.asarray([len(frame) for frame in frames], dtype=int)
-    if np.any(atom_counts != n_atoms):
-        raise ValueError("frames do not have a constant atom count")
     expected_models = [str(Path(model_path)) for model_path in model_paths]
     if result["model_paths"].shape != (n_models,):
         raise ValueError("model-path array shape does not match the model list")
@@ -68,7 +65,20 @@ def load_ensemble_predictions(
         raise ValueError("sampled source-frame indices do not match")
     if result["all_energies"].shape != (n_models, n_frames):
         raise ValueError("energy array shape does not match the current inputs")
-    if result["all_forces"].shape != (n_models, n_frames, n_atoms, 3):
+    cached_forces = result["all_forces"]
+    if cached_forces.dtype == object:
+        force_frames = list(cached_forces)
+        if len(force_frames) != n_frames or any(
+            np.asarray(frame).shape != (n_models, len(frames[index]), 3)
+            for index, frame in enumerate(force_frames)
+        ):
+            raise ValueError("force array shape does not match the current inputs")
+    elif cached_forces.shape != (
+        n_models,
+        n_frames,
+        int(atom_counts[0]),
+        3,
+    ) or np.any(atom_counts != atom_counts[0]):
         raise ValueError("force array shape does not match the current inputs")
     if result["model_labels"].shape != (n_models,):
         raise ValueError("model-label array shape does not match the model list")
@@ -86,17 +96,13 @@ def evaluate_one_model(
     *,
     model_label: str | None = None,
     progress_every: int = 50,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Evaluate one model on all frames and return total energies and forces."""
+):
+    """Evaluate one model, returning dense or ragged per-frame forces."""
     if not frames:
         raise ValueError("No frames supplied for prediction.")
 
     atom_counts = np.asarray([len(frame) for frame in frames], dtype=int)
-    if np.any(atom_counts != atom_counts[0]):
-        raise ValueError(
-            "Version 1 prediction arrays require a constant atom count within "
-            "each evaluated trajectory/dataset."
-        )
+    constant_atoms = bool(np.all(atom_counts == atom_counts[0]))
 
     label = model_label or Path(model_path).stem
     calculator = build_mace_range_calculator(
@@ -108,9 +114,8 @@ def evaluate_one_model(
     )
 
     n_frames = len(frames)
-    n_atoms = int(atom_counts[0])
     energies = np.empty(n_frames, dtype=np.float64)
-    forces = np.empty((n_frames, n_atoms, 3), dtype=np.float32)
+    forces_list: list[np.ndarray] = []
 
     try:
         for i, source_atoms in enumerate(frames):
@@ -118,12 +123,13 @@ def evaluate_one_model(
             atoms.calc = calculator
             energies[i] = float(atoms.get_potential_energy())
             pred_forces = np.asarray(atoms.get_forces(), dtype=np.float32)
-            if pred_forces.shape != (n_atoms, 3):
+            expected = (len(source_atoms), 3)
+            if pred_forces.shape != expected:
                 raise ValueError(
                     f"Unexpected force shape for {label}, frame {i}: "
-                    f"{pred_forces.shape}; expected {(n_atoms, 3)}."
+                    f"{pred_forces.shape}; expected {expected}."
                 )
-            forces[i] = pred_forces
+            forces_list.append(pred_forces.copy())
             atoms.calc = None
 
             if (
@@ -142,7 +148,7 @@ def evaluate_one_model(
         except Exception:
             pass
 
-    return energies, forces
+    return energies, np.stack(forces_list, axis=0) if constant_atoms else forces_list
 
 
 def evaluate_ensemble(
@@ -159,18 +165,25 @@ def evaluate_ensemble(
     if not frames:
         raise ValueError("No frames supplied for ensemble prediction.")
 
+    n_models = len(model_paths)
     n_frames = len(frames)
-    n_atoms = len(frames[0])
+    atom_counts = np.asarray([len(frame) for frame in frames], dtype=int)
+    constant_atoms = bool(np.all(atom_counts == atom_counts[0]))
     used: set[str] = set()
     labels = [safe_label(path, used) for path in model_paths]
 
-    all_energies = np.empty((len(model_paths), n_frames), dtype=np.float64)
-    all_forces = np.empty(
-        (len(model_paths), n_frames, n_atoms, 3), dtype=np.float32
+    all_energies = np.empty((n_models, n_frames), dtype=np.float64)
+    all_forces = (
+        np.empty((n_models, n_frames, int(atom_counts[0]), 3), dtype=np.float32)
+        if constant_atoms
+        else [
+            np.empty((n_models, int(atom_count), 3), dtype=np.float32)
+            for atom_count in atom_counts
+        ]
     )
 
     for m, (model_path, label) in enumerate(zip(model_paths, labels)):
-        print(f"[{m + 1}/{len(model_paths)}] Loading {label}: {model_path}")
+        print(f"[{m + 1}/{n_models}] Loading {label}: {model_path}")
         energies, forces = evaluate_one_model(
             frames,
             model_path,
@@ -179,7 +192,11 @@ def evaluate_ensemble(
             progress_every=progress_every,
         )
         all_energies[m] = energies
-        all_forces[m] = forces
+        if constant_atoms:
+            all_forces[m] = np.asarray(forces, dtype=np.float32)
+        else:
+            for index, frame_forces in enumerate(forces):
+                all_forces[index][m] = np.asarray(frame_forces, dtype=np.float32)
         del energies, forces
         gc.collect()
 
@@ -189,6 +206,7 @@ def evaluate_ensemble(
     return {
         "all_energies": all_energies,
         "all_forces": all_forces,
+        "atom_counts": atom_counts,
         "model_labels": labels,
         "model_paths": [str(Path(p)) for p in model_paths],
         "source_frame_indices": np.asarray(source_frame_indices, dtype=int),

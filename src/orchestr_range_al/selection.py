@@ -39,9 +39,15 @@ def _orchestr_imports():
     )
 
 
-def _force_summaries(sigma_components: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    atom_sigma = np.linalg.norm(np.asarray(sigma_components, dtype=float), axis=2)
-    return np.mean(atom_sigma, axis=1), np.max(atom_sigma, axis=1)
+def _force_summaries(sigma_components) -> tuple[np.ndarray, np.ndarray]:
+    if isinstance(sigma_components, np.ndarray) and sigma_components.dtype != object:
+        atom_sigma = np.linalg.norm(np.asarray(sigma_components, dtype=float), axis=2)
+        return np.mean(atom_sigma, axis=1), np.max(atom_sigma, axis=1)
+    frames = [np.asarray(value, dtype=float) for value in list(sigma_components)]
+    return (
+        np.asarray([np.mean(np.linalg.norm(frame, axis=1)) for frame in frames]),
+        np.asarray([np.max(np.linalg.norm(frame, axis=1)) for frame in frames]),
+    )
 
 
 def _copy_if_distinct(source: Path, target: Path) -> None:

@@ -19,6 +19,26 @@ def test_ensemble_shapes_and_ddof():
     np.testing.assert_allclose(
         stats["sigma_force_components"][:, 0, 0], [np.sqrt(2), np.sqrt(2)]
     )
+
+def test_ragged_reference_ensemble_statistics():
+    energies = np.array([[1.0, 2.0], [3.0, 4.0]])
+    forces = [
+        np.array([[[0.0, 0.0, 0.0]], [[2.0, 0.0, 0.0]]]),
+        np.array(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                [[2.0, 0.0, 0.0], [4.0, 0.0, 0.0]],
+            ]
+        ),
+    ]
+    stats = compute_ensemble_statistics(energies, forces)
+    assert stats["atom_counts"].tolist() == [1, 2]
+    assert isinstance(stats["mean_forces"], list)
+    assert stats["mean_forces"][0].shape == (1, 3)
+    assert stats["mean_forces"][1].shape == (2, 3)
+    np.testing.assert_allclose(
+        stats["sigma_energy_per_atom"], [np.sqrt(2), np.sqrt(2) / 2]
+    )
 def test_load_ensemble_predictions_validates_and_reuses_cache(tmp_path):
     frames = [np.zeros((2, 3)), np.zeros((2, 3))]
     model_paths = [tmp_path / "one.model", tmp_path / "two.model"]

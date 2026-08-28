@@ -221,6 +221,17 @@ class CalibrationBundle:
         return float(model.s) if model is not None and hasattr(model, "s") else None
 
 
+def _flatten_force_values(values) -> np.ndarray:
+    if isinstance(values, np.ndarray) and values.dtype != object:
+        return np.asarray(values, dtype=float).reshape(-1)
+    frames = [np.asarray(value, dtype=float) for value in list(values)]
+    return (
+        np.concatenate([frame.reshape(-1) for frame in frames])
+        if frames
+        else np.asarray([], dtype=float)
+    )
+
+
 def fit_calibration(
     validation: dict[str, Any],
     train_stats: dict[str, np.ndarray],
@@ -258,14 +269,18 @@ def fit_calibration(
     energy_delta = np.asarray(validation["energy_error_per_atom"], dtype=float)
     energy_sigma_raw = np.asarray(train_stats["sigma_energy_per_atom"], dtype=float)
 
-    force_error = np.asarray(validation["force_error"], dtype=float)
-    force_delta_comp = force_error.reshape(-1)
-    force_sigma_components = np.asarray(train_stats["sigma_force_components"], dtype=float)
-    force_sigma_comp_raw = force_sigma_components.reshape(-1)
+    force_error = validation["force_error"]
+    force_delta_comp = _flatten_force_values(force_error)
+    force_sigma_components = train_stats["sigma_force_components"]
+    force_sigma_comp_raw = _flatten_force_values(force_sigma_components)
 
     # This reproduces MLFFStats.force_rmse_per_atom used by run_uq_metrics.
-    force_delta_atom = np.sqrt(np.nanmean(force_error**2, axis=2)).reshape(-1)
-    force_sigma_atom_raw = np.linalg.norm(force_sigma_components, axis=2).reshape(-1)
+    force_delta_atom = np.asarray(
+        [np.sqrt(np.nanmean(np.asarray(frame) ** 2, axis=1)) for frame in list(force_error)]
+    ).reshape(-1)
+    force_sigma_atom_raw = np.asarray(
+        [np.linalg.norm(np.asarray(frame), axis=1) for frame in list(force_sigma_components)]
+    ).reshape(-1)
 
     cal_var_F = Var().fit(force_delta_comp, force_sigma_comp_raw)
     force_sigma_comp_var = cal_var_F.transform(force_sigma_comp_raw)
@@ -375,12 +390,14 @@ def calibration_support(
     sigma_F_pool_mean_raw = np.asarray(pool_stats["sigma_force_mean"], dtype=float)
     sigma_F_pool_max_raw = np.asarray(pool_stats["sigma_force_max"], dtype=float)
 
-    true_forces = np.asarray(validation["reference_forces"], dtype=float)
-    frame_max_force_train_raw = np.max(np.linalg.norm(true_forces, axis=2), axis=1)
-    pred_pool_forces = np.asarray(pool_stats["mean_forces"], dtype=float)
-    frame_force_norm_pool = np.linalg.norm(pred_pool_forces, axis=2)
-    frame_max_force_pool_raw = np.max(frame_force_norm_pool, axis=1)
-    frame_mean_force_pool_raw = np.mean(frame_force_norm_pool, axis=1)
+    true_forces = validation["reference_forces"]
+    frame_max_force_train_raw = np.asarray(
+        [np.max(np.linalg.norm(np.asarray(frame), axis=1)) for frame in list(true_forces)]
+    )
+    pred_pool_forces = pool_stats["mean_forces"]
+    frame_force_norm_pool = [np.linalg.norm(np.asarray(frame), axis=1) for frame in list(pred_pool_forces)]
+    frame_max_force_pool_raw = np.asarray([np.max(norms) for norms in frame_force_norm_pool])
+    frame_mean_force_pool_raw = np.asarray([np.mean(norms) for norms in frame_force_norm_pool])
 
     support_E = oai["in_range"](
         sigma_E_pool_atom_raw,
@@ -486,41 +503,37 @@ def calibrate_energy_total(
 
 
 def calibrate_force_components(
-    sigma_components: np.ndarray,
+    sigma_components,
     bundle: CalibrationBundle,
     *,
     in_support: np.ndarray | None = None,
-) -> np.ndarray:
+):
     """Apply the ivan2 selected force mode; ISO falls back to VAR out-of-support."""
-    sigma = np.asarray(sigma_components, dtype=float)
     mode = bundle.force_mode
+    is_dense = isinstance(sigma_components, np.ndarray) and sigma_components.dtype != object
+    if is_dense:
+        sigma = np.asarray(sigma_components, dtype=float)
+        frames = [sigma[index] for index in range(sigma.shape[0])]
+    else:
+        frames = [np.asarray(value, dtype=float) for value in list(sigma_components)]
     if mode is None:
-        return sigma.copy()
+        return sigma.copy() if is_dense else [frame.copy() for frame in frames]
 
     oai = _orchestr_imports()
-    shape = sigma.shape
-    flat = sigma.reshape(-1)
-    calibrated = oai["apply_sigma_comp_calibration"](
-        flat,
-        bundle.calibrators,
-        mode,
-    ).reshape(shape)
-
-    if mode == "iso" and in_support is not None:
-        var = oai["apply_sigma_comp_calibration"](
-            flat,
-            bundle.calibrators,
-            "var",
-        ).reshape(shape)
-        support = np.asarray(in_support, dtype=bool)
-        if sigma.ndim < 2 or sigma.shape[0] != support.size:
-            raise ValueError(
-                "in_support must have one entry per frame when calibrating pool forces."
+    calibrated_frames = []
+    support = None if in_support is None else np.asarray(in_support, dtype=bool)
+    if support is not None and support.size != len(frames):
+        raise ValueError("in_support must have one entry per frame when calibrating pool forces.")
+    for index, frame in enumerate(frames):
+        shape = frame.shape
+        flat = frame.reshape(-1)
+        calibrated = oai["apply_sigma_comp_calibration"](flat, bundle.calibrators, mode)
+        if mode == "iso" and support is not None and not support[index]:
+            calibrated = oai["apply_sigma_comp_calibration"](
+                flat, bundle.calibrators, "var"
             )
-        mask_shape = (support.size,) + (1,) * (sigma.ndim - 1)
-        calibrated = np.where(support.reshape(mask_shape), calibrated, var)
-
-    return np.asarray(calibrated, dtype=float)
+        calibrated_frames.append(np.asarray(calibrated, dtype=float).reshape(shape))
+    return np.stack(calibrated_frames, axis=0) if is_dense else calibrated_frames
 
 
 def expected_absolute_errors(

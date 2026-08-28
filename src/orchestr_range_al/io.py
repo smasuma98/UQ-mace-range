@@ -93,13 +93,12 @@ def read_reference_dataset(
     forces = [_reference_forces(frame, forces_key) for frame in frames]
 
     counts = np.asarray([len(frame) for frame in frames], dtype=int)
-    if np.any(counts != counts[0]):
-        raise ValueError(
-            "Version 1 ensemble storage expects constant atom count within the "
-            "reference dataset."
-        )
-    forces_arr = np.stack(forces, axis=0)
-    return frames, energies, forces_arr, source
+    forces_out = (
+        np.stack(forces, axis=0)
+        if np.all(counts == counts[0])
+        else [np.asarray(force, dtype=float) for force in forces]
+    )
+    return frames, energies, forces_out, source
 
 
 def write_predictions_npz(path: str | Path, data: dict[str, Any]) -> None:
@@ -107,8 +106,10 @@ def write_predictions_npz(path: str | Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     serializable = {}
     for key, value in data.items():
-        if isinstance(value, (list, tuple)) and value and isinstance(value[0], str):
-            serializable[key] = np.asarray(value, dtype=object)
+        if isinstance(value, (list, tuple)):
+            obj = np.empty(len(value), dtype=object)
+            obj[:] = list(value)
+            serializable[key] = obj
         else:
             serializable[key] = value
     np.savez_compressed(path, **serializable)
@@ -120,7 +121,10 @@ def frame_summary_dataframe(
 ) -> pd.DataFrame:
     source = ensemble_result["source_frame_indices"]
     n_frames = len(source)
-    n_atoms = stats["mean_forces"].shape[1]
+    atom_counts = np.asarray(
+        stats.get("atom_counts", [len(value) for value in stats["mean_forces"]]),
+        dtype=float,
+    )
     table: dict[str, Any] = {
         "sampled_frame": np.arange(n_frames, dtype=int),
         "source_frame": source,
@@ -136,7 +140,7 @@ def frame_summary_dataframe(
     for i, label in enumerate(ensemble_result["model_labels"]):
         table[f"energy_{label}_eV"] = ensemble_result["all_energies"][i]
         table[f"energy_per_atom_{label}_eV"] = (
-            ensemble_result["all_energies"][i] / float(n_atoms)
+            ensemble_result["all_energies"][i] / atom_counts
         )
     return pd.DataFrame(table)
 
