@@ -75,4 +75,4 @@ For a quick config check without running model inference:
 python scripts/run_range_al.py --config configs/config_range_al.yaml --dry-run
 ```
 
-Results are written to the output directory defined in the YAML config, including selected frames, diagnostics, uncertainty data, and Orchestr.AI-style dashboard plots.
+Results are written to the output directory defined in the YAML config, including selected frames, diagnostics, uncertainty data, and Orchestr.AI-style dashboard plots. Good luck!
